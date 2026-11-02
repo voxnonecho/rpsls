@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multiplayer RPSLS</title>
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<style>
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    background-color: #f4f4f9;
+    margin: 0;
+  }
+  
+  h1 { color: #333; margin-bottom: 10px; text-align: center; }
+
+  /* Multiplayer Connection Panel */
+  #connection-panel {
+    background: #e3f2fd;
+    border: 2px solid #2196f3;
+    padding: 15px 30px;
+    border-radius: 8px;
+    text-align: center;
+    margin-bottom: 20px;
+    color: #0d47a1;
+    font-weight: bold;
+    box-shadow: 0 4px 10px rgba(33, 150, 243, 0.2);
+  }
+
+  #invite-link-container { margin-top: 10px; display: none; }
+  #invite-url { background: white; padding: 5px 10px; border-radius: 4px; border: 1px solid #2196f3; user-select: all; cursor: pointer; }
+
+  /* Scoreboard Styles */
+  #scoreboard { display: flex; gap: 20px; margin-bottom: 40px; }
+  .score-box {
+    background: white; padding: 10px 25px; border-radius: 8px; text-align: center;
+    font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.1); color: #666; text-transform: uppercase; font-size: 12px;
+  }
+  .score-box span { display: block; font-size: 28px; color: #333; margin-top: 5px; }
+
+  /* Pentagon & Nodes (Unchanged) */
+  .pentagon-container { position: relative; width: 340px; height: 340px; margin-bottom: 40px; }
+  svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; }
+  svg line { transition: stroke 0.3s ease, stroke-width 0.3s ease; }
+
+  .node {
+    position: absolute; width: 80px; height: 80px; background: white; border-radius: 50%;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.15); transform: translate(-50%, -50%); 
+    font-weight: 700; font-size: 12px; border: 4px solid; z-index: 1; cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s, filter 0.2s;
+  }
+  .node:hover { transform: translate(-50%, -50%) scale(1.1); box-shadow: 0 8px 20px rgba(0,0,0,0.25); }
+  .node span { font-size: 26px; margin-bottom: 2px; }
+
+  /* Disabled state when waiting for opponent */
+  .disabled { pointer-events: none; filter: grayscale(100%) opacity(0.6); }
+
+  .paper { top: 10%; left: 50%; border-color: #4caf50; color: #1b5e20; }
+  .scissors { top: 38%; left: 88%; border-color: #2196f3; color: #0d47a1; }
+  .spock { top: 82%; left: 74%; border-color: #9c27b0; color: #4a148c; }
+  .lizard { top: 82%; left: 26%; border-color: #fbc02d; color: #f57f17; }
+  .rock { top: 38%; left: 12%; border-color: #f44336; color: #b71c1c; }
+
+  /* Status Icons */
+  .status-icon {
+    position: absolute; font-size: 28px; top: -15px; right: -15px; z-index: 2;
+    pointer-events: none; filter: drop-shadow(0 2px 5px rgba(0,0,0,0.3)); animation: popIn 0.3s ease-out;
+  }
+  @keyframes popIn { 0% { transform: scale(0); opacity: 0; } 80% { transform: scale(1.2); opacity: 1; } 100% { transform: scale(1); } }
+
+  .player-choice::after, .opponent-choice::before, .tie-choice::after {
+    position: absolute; color: white; padding: 3px 10px; border-radius: 12px; font-size: 11px;
+    font-weight: bold; pointer-events: none; box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    display: flex; gap: 4px; align-items: center;
+  }
+  .player-choice { transform: translate(-50%, -50%) scale(1.15); box-shadow: 0 0 0 6px rgba(33, 150, 243, 0.2); }
+  .player-choice::after { content: "👤 YOU"; bottom: -30px; background: #2196f3; }
+  .opponent-choice { transform: translate(-50%, -50%) scale(1.15); box-shadow: 0 0 0 6px rgba(244, 67, 54, 0.2); }
+  .opponent-choice::before { content: "📱 THEM"; top: -30px; background: #f44336; }
+  .tie-choice { transform: translate(-50%, -50%) scale(1.15); box-shadow: 0 0 0 6px rgba(100, 100, 100, 0.2); }
+  .tie-choice::after { content: "BOTH"; bottom: -30px; background: #666; }
+
+  #result-display {
+    text-align: center; background: white; padding: 20px 40px; border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1); min-width: 300px; min-height: 80px; display: flex; flex-direction: column; align-items: center;
+  }
+  #result-text { font-size: 22px; font-weight: bold; color: #333; margin: 0 0 10px 0; }
+  #result-subtext { font-size: 16px; color: #666; margin: 0 0 15px 0; }
+  
+  #next-round-btn {
+    display: none; background: #333; color: white; border: none; padding: 10px 20px; border-radius: 6px;
+    font-weight: bold; cursor: pointer; transition: background 0.2s;
+  }
+  #next-round-btn:hover { background: #555; }
+
+</style>
+</head>
+<body>
+
+<h1>Multiplayer RPSLS</h1>
+
+<div id="connection-panel">
+  <span id="connection-status">Initializing Game Network...</span>
+  <div id="invite-link-container">
+    Send this link to your partner: <br/>
+    <input type="text" id="invite-url" readonly onclick="this.select(); document.execCommand('copy'); alert('Link Copied!');">
+  </div>
+</div>
+
+<div id="scoreboard">
+  <div class="score-box">Wins<span id="score-wins">0</span></div>
+  <div class="score-box">Ties<span id="score-ties">0</span></div>
+  <div class="score-box">Losses<span id="score-losses">0</span></div>
+</div>
+
+<div class="pentagon-container" id="game-board">
+  <svg viewBox="0 0 100 100">
+    <line id="line-paper-scissors" x1="50" y1="10" x2="88" y2="38" stroke="#ccc" stroke-width="1.5" />
+    <line id="line-scissors-spock" x1="88" y1="38" x2="74" y2="82" stroke="#ccc" stroke-width="1.5" />
+    <line id="line-lizard-spock" x1="74" y1="82" x2="26" y2="82" stroke="#ccc" stroke-width="1.5" />
+    <line id="line-lizard-rock" x1="26" y1="82" x2="12" y2="38" stroke="#ccc" stroke-width="1.5" />
+    <line id="line-paper-rock" x1="12" y1="38" x2="50" y2="10" stroke="#ccc" stroke-width="1.5" />
+    <line id="line-paper-spock" x1="50" y1="10" x2="74" y2="82" stroke="#ccc" stroke-width="1.5" />
+    <line id="line-lizard-scissors" x1="88" y1="38" x2="26" y2="82" stroke="#ccc" stroke-width="1.5" />
+    <line id="line-rock-spock" x1="74" y1="82" x2="12" y2="38" stroke="#ccc" stroke-width="1.5" />
+    <line id="line-lizard-paper" x1="26" y1="82" x2="50" y2="10" stroke="#ccc" stroke-width="1.5" />
+    <line id="line-rock-scissors" x1="12" y1="38" x2="88" y2="38" stroke="#ccc" stroke-width="1.5" />
+  </svg>
+
+  <button class="node paper disabled" onclick="makeChoice('paper')"><span>📄</span>Paper</button>
+  <button class="node scissors disabled" onclick="makeChoice('scissors')"><span>✂️</span>Scissors</button>
+  <button class="node spock disabled" onclick="makeChoice('spock')"><span>🖖</span>Spock</button>
+  <button class="node lizard disabled" onclick="makeChoice('lizard')"><span>🦎</span>Lizard</button>
+  <button class="node rock disabled" onclick="makeChoice('rock')"><span>🪨</span>Rock</button>
+</div>
+
+<div id="result-display">
+  <p id="result-text">Waiting for connection...</p>
+  <p id="result-subtext">The game will unlock when both players are here.</p>
+  <button id="next-round-btn" onclick="requestNextRound()">Play Next Round</button>
+</div>
+
+<script>
+  const rules = {
+    rock: { scissors: 'crushes', lizard: 'crushes' },
+    paper: { rock: 'covers', spock: 'disproves' },
+    scissors: { paper: 'cuts', lizard: 'decapitates' },
+    lizard: { spock: 'poisons', paper: 'eats' },
+    spock: { scissors: 'smashes', rock: 'vaporizes' }
+  };
+  const colors = { paper: '#4caf50', scissors: '#2196f3', spock: '#9c27b0', lizard: '#fbc02d', rock: '#f44336' };
+  
+  let wins = 0, losses = 0, ties = 0;
+  let myChoice = null, opponentChoice = null;
+  let peer = new Peer();
+  let conn = null;
+
+  const urlParams = new URLSearchParams(window.location.search);
+  const roomToJoin = urlParams.get('room');
+
+  const statusText = document.getElementById('connection-status');
+  const resText = document.getElementById('result-text');
+  const resSubtext = document.getElementById('result-subtext');
+  const nodes = document.querySelectorAll('.node');
+
+  // --- MULTIPLAYER NETWORKING ---
+
+  peer.on('open', (id) => {
+    if (roomToJoin) {
+      // We are the GUEST joining the HOST
+      statusText.innerText = "Connecting to your partner...";
+      conn = peer.connect(roomToJoin);
+      setupConnection(conn);
+    } else {
+      // We are the HOST creating the game
+      statusText.innerText = "Waiting for your partner to join...";
+      const inviteUrl = window.location.href.split('?')[0] + '?room=' + id;
+      document.getElementById('invite-link-container').style.display = "block";
+      document.getElementById('invite-url').value = inviteUrl;
+    }
+  });
+
+  peer.on('connection', (connection) => {
+    // Host accepts Guest connection
+    conn = connection;
+    document.getElementById('invite-link-container').style.display = "none";
+    setupConnection(conn);
+  });
+
+  function setupConnection(connection) {
+    connection.on('open', () => {
+      statusText.innerText = "🟢 Connected! Game On.";
+      statusText.style.color = "#4caf50";
+      document.getElementById('connection-panel').style.borderColor = "#4caf50";
+      unlockBoard();
+    });
+
+    connection.on('data', (data) => {
+      if (data.type === 'choice') {
+        opponentChoice = data.payload;
+        checkMatchResult();
+      } else if (data.type === 'next_round') {
+        resetBoardUI();
+        unlockBoard();
+      }
+    });
+  }
+
+  // --- GAMEPLAY LOGIC ---
+
+  function makeChoice(choice) {
+    if (myChoice) return; // Prevent double-clicking
+    myChoice = choice;
+    
+    // Lock the board and visually mark our pick
+    lockBoard();
+    document.querySelector(`.${choice}`).classList.add('player-choice');
+    resText.innerText = "Choice locked!";
+    resSubtext.innerText = "Waiting for your partner to pick...";
+
+    // Send our choice to the opponent
+    conn.send({ type: 'choice', payload: choice });
+    checkMatchResult();
+  }
+
+  function checkMatchResult() {
+    // Only resolve if both players have made their move
+    if (myChoice && opponentChoice) {
+      revealWinner();
+    }
+  }
+
+  function unlockBoard() {
+    myChoice = null;
+    opponentChoice = null;
+    nodes.forEach(n => n.classList.remove('disabled'));
+    resText.innerText = "Make your move!";
+    resSubtext.innerText = "Click an icon to lock in your choice.";
+    document.getElementById('next-round-btn').style.display = 'none';
+  }
+
+  function lockBoard() {
+    nodes.forEach(n => n.classList.add('disabled'));
+  }
+
+  function resetBoardUI() {
+    document.querySelectorAll('svg line').forEach(line => {
+      line.setAttribute('stroke', '#ccc');
+      line.setAttribute('stroke-width', '1.5');
+    });
+    nodes.forEach(node => {
+      node.classList.remove('player-choice', 'opponent-choice', 'tie-choice');
+    });
+    document.querySelectorAll('.status-icon').forEach(icon => icon.remove());
+  }
+
+  function requestNextRound() {
+    // Tell partner we are ready for the next round
+    conn.send({ type: 'next_round' });
+    resetBoardUI();
+    unlockBoard();
+  }
+
+  function revealWinner() {
+    const capitalize = (w) => w.charAt(0).toUpperCase() + w.slice(1);
+    const pNode = document.querySelector(`.${myChoice}`);
+    const oppNode = document.querySelector(`.${opponentChoice}`);
+    const victoryIcon = '<span class="status-icon">🏆</span>';
+    const defeatIcon = '<span class="status-icon">❌</span>';
+
+    resSubtext.innerText = `👤 You chose ${capitalize(myChoice)}. 📱 They chose ${capitalize(opponentChoice)}.`;
+
+    if (myChoice === opponentChoice) {
+      ties++;
+      document.getElementById('score-ties').innerText = ties;
+      resText.innerText = "It's a Tie!";
+      resText.style.color = "#333";
+      pNode.classList.add('tie-choice');
+    } else {
+      oppNode.classList.add('opponent-choice');
+      const lineId = 'line-' + [myChoice, opponentChoice].sort().join('-');
+      const line = document.getElementById(lineId);
+
+      if (rules[myChoice][opponentChoice]) {
+        // We win
+        wins++;
+        document.getElementById('score-wins').innerText = wins;
+        resText.innerText = `You Win! ${capitalize(myChoice)} ${rules[myChoice][opponentChoice]} ${capitalize(opponentChoice)}.`;
+        resText.style.color = "#4caf50"; 
+        pNode.insertAdjacentHTML('beforeend', victoryIcon);
+        oppNode.insertAdjacentHTML('beforeend', defeatIcon);
+        line.setAttribute('stroke', colors[myChoice]);
+        line.setAttribute('stroke-width', '5');
+      } else {
+        // They win
+        losses++;
+        document.getElementById('score-losses').innerText = losses;
+        resText.innerText = `You Lose! ${capitalize(opponentChoice)} ${rules[opponentChoice][myChoice]} ${capitalize(myChoice)}.`;
+        resText.style.color = "#f44336"; 
+        oppNode.insertAdjacentHTML('beforeend', victoryIcon);
+        pNode.insertAdjacentHTML('beforeend', defeatIcon);
+        line.setAttribute('stroke', colors[opponentChoice]);
+        line.setAttribute('stroke-width', '5');
+      }
+    }
+    document.getElementById('next-round-btn').style.display = 'block';
+  }
+</script>
+
+</body>
+</html>
